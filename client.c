@@ -8,8 +8,11 @@
 #include<netdb.h>
 #include<unistd.h>
 
+#define MYERROR(condition,msg,errorValue); if((condition)){printf("%s\n",(msg));return (errorValue);}
+
 #define MAX_OPTION 4
 char OPTIONS[MAX_OPTION][3]={"-h","-p","-o","-s"};
+bool OPTIONS_FLAG[MAX_OPTION];
 
 int sendHello(char* hostName) {
     int sockFd;
@@ -21,30 +24,27 @@ int sendHello(char* hostName) {
     int n;
 
     sockFd = socket(AF_INET, SOCK_STREAM, 0);
-    if(sockFd<0) {
-        printf("creating socket failed\n");
-        return -1;
-    }
+    MYERROR(sockFd<0,"creating socket failed",-1);
+    
     server = gethostbyname(hostName);
-    if(server == NULL) {
-        printf("getting host name failed\n");
-        return -2;
-    }
-
+    MYERROR(server==NULL,"getting host name failed",-2);
+    
     memset(&serverAddr, 0, sizeof(serverAddr));
     serverAddr.sin_family=AF_INET;
     memcpy((char*)&(serverAddr.sin_addr.s_addr),(char*)server->h_addr,server->h_length);
     serverAddr.sin_port=3001;
-    if(connect(sockFd,(struct sockaddr*)&serverAddr,sizeof(serverAddr))<0) {
-        printf("connecting failed\n");
-        return -3;
-    }
-    // n=write(sockfd,"Hello",strlen("Hello"));
-    n=send(sockFd,"Hello",strlen("Hello"),0);
-    if(n<0) {
-        printf("writing to socket failed\n");
-        return -4;
-    }
+
+    MYERROR(connect(sockFd,(struct sockaddr*)&serverAddr,sizeof(serverAddr))<0,"connecting failed",-3);
+    
+    sprintf(buffer,"Hello");
+    n=send(sockFd,buffer,strlen(buffer)+1,0);
+    MYERROR(n<0,"sending failed",-4);
+    printf("Sending %d bytes...\n",n);
+
+    n=recv(sockFd,buffer,256,0);
+    MYERROR(n<0,"receiving response failed",-5);
+    printf("Response : %s\n",buffer);
+    
     close(sockFd);
     return 0;
 }
@@ -61,15 +61,17 @@ int main(int argc, char **argv) {
 
     memset(&hostSockaddr,0,sizeof(hostSockaddr));
 
-    printf("Hello, this is client\n");
-    printf("argc : %d\n",argc);
-    for(i=0;i<argc;i++) {
-        printf("argv[%d] : %s\n",i,argv[i]);
-    }
+    // printf("Hello, this is client\n");
+    // printf("argc : %d\n",argc);
+    // for(i=0;i<argc;i++) {
+    //     printf("argv[%d] : %s\n",i,argv[i]);
+    // }
     for(i=1;i<argc;i+=2) {
         for(j=0;j<4;j++) {
-            if(strncmp(&OPTIONS[j][0],argv[i],3)==0)
+            if(strncmp(&OPTIONS[j][0],argv[i],3)==0) {
+                OPTIONS_FLAG[j]=true;
                 break;
+            }
         }
         switch(j) {
             case 0 : printf("host : %s\n",argv[i+1]);
@@ -77,12 +79,14 @@ int main(int argc, char **argv) {
                 // hostSockaddr.sa_family=AF_INET;
                 // hostSockaddr.sa_data=
                  break;
-            case 1 : printf("port : %s\n",argv[i+1]); break;
-            case 2 : printf("isEncrypt : %s\n",argv[i+1]); break;
-            case 3 : printf("shift : %s\n",argv[i+1]); break;
-            default: i=argc;//Unexpected flag
+            case 1 : /*printf("port : %s\n",argv[i+1]);*/ break;
+            case 2 : /*printf("isEncrypt : %s\n",argv[i+1]);*/ break;
+            case 3 : /*printf("shift : %s\n",argv[i+1]);*/ break;
+            default: /*printf("unexpected flag : %s\n",argv[i]);*/ i=argc;//Unexpected flag
         }
     }
+    for(i=0;i<MAX_OPTION;i++)
+        printf("%s %d\n",OPTIONS[i],OPTIONS_FLAG[i]);
 //    ./client -h 143.248.111.222 -p 1234 -o 0 -s 5
 //    HOST. 143.248.111.222, Port: 1234 Operation: encrypt, Shift 5
     return 0;
