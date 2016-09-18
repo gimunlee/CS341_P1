@@ -2,19 +2,34 @@
 #include<stdbool.h>
 
 #include<string.h>
+#include<limits.h>
 
 #include<netinet/in.h>
 #include<sys/socket.h>
 #include<unistd.h>
 
 #define MYERROR(condition,msg,errorValue); if((condition)){printf("%s\n",(msg));return (errorValue);}
+unsigned short accumulateShorts(char* buffer, size_t length) {
+    unsigned long sum=0;
+    size_t i;
+
+    for(i=0;i<length-1;i+=2)
+        sum+=*(unsigned short*)(buffer+i);
+    if(length%2==1)
+        sum+=*(char*)(buffer+length-1);
+
+    while(sum>USHRT_MAX)
+        sum=(sum & USHRT_MAX) + sum>>16;
+
+    return ~sum;
+}
 
 int main(void) {
     int socketFd, inSocketFd;
     char buffer[256];
     struct sockaddr_in serverAddr, clientAddr;
     socklen_t clientLen=sizeof(clientAddr);
-    int n;
+    size_t n;
 
     //creating socket
     socketFd = socket(AF_INET, SOCK_STREAM, 0);
@@ -37,12 +52,12 @@ int main(void) {
     MYERROR(n<0,"receiving failed",-5);
 
     //print data
-    printf("Data Recved (%d) : %s\n",n,buffer);
+    printf("Data Recved (%lu) : %s\n",n,buffer);
 
-    sprintf(buffer,"Roger that. %d bytes",n);
+    sprintf(buffer,"Roger that. %lu bytes",n);
     n = send(inSocketFd,buffer,strlen(buffer)+1,0);
     MYERROR(n<0,"sending failed",-6);
-    printf("Response with %d bytes\n",n);
+    printf("Response with %lu bytes\n",n);
 
     //close socket
     close(inSocketFd);
