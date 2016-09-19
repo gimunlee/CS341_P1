@@ -3,6 +3,7 @@
 
 #include<string.h>
 #include<limits.h>
+#include<ctype.h>
 
 #include<netinet/in.h>
 #include<sys/socket.h>
@@ -24,12 +25,31 @@ unsigned short accumulateShorts(char* buffer, size_t length) {
     return ~sum;
 }
 
+void cipher(char* buffer, size_t length, int shift) {
+    size_t i;
+    int tempChar;
+
+    // printf("======\n");
+    // printf("input : %s\n",buffer);
+    for(i=0;i<length;i++) {
+        buffer[i]=(char)tolower((int)buffer[i]);
+        tempChar=buffer[i]-'a';
+        if(0<tempChar && tempChar<26)
+            buffer[i]='a'+(((tempChar+shift)%26)+26)%26;
+    }
+    // printf("plain : %s\n",buffer);
+    // printf("cipher : %s\n",buffer);
+}
+
 int main(void) {
     int socketFd, inSocketFd;
     char buffer[256];
     struct sockaddr_in serverAddr, clientAddr;
     socklen_t clientLen=sizeof(clientAddr);
     size_t n;
+
+    // strncpy(buffer,"Hello, This is Gimun Lee!",strlen("Hello, This is Gimun Lee!")+1);
+    // cipher(buffer,strlen(buffer),-6);
 
     //creating socket
     socketFd = socket(AF_INET, SOCK_STREAM, 0);
