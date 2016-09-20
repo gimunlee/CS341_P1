@@ -144,7 +144,7 @@ int main(void) {
             //close socket
             close(inSocketFd);
             free(buffer);
-            // printf("exit");
+            printf("exit");
             exit(1);
         }
     }

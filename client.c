@@ -17,40 +17,28 @@
 #define MAX_OPTION 4
 char OPTIONS[MAX_OPTION][3]={"-h","-p","-o","-s"};
 
-#define BUFFERSIZE 256
+// #define BUFFERSIZE 2
+#define BUFFERSIZE 10*1024*1024
 
-unsigned short accumulateShorts(char* header, char* message, size_t length) {
+//Given pseudo header and message, calculate checksum of it.
+unsigned short calcChecksum(char* header, char* message, size_t length) {
     unsigned long sum=0;
     size_t i;
 
-    // printf("acc header\n");
-    for(i=0;i<8;i+=2) {
-        printf("%p : %4hx\n",header+i,*(unsigned short*)(header+i));
+    for(i=0;i<8;i+=2)
         sum+=*(unsigned short*)(header+i);
-    }
-
-    // printf("acc message\n");
-    for(i=0;i<length-1;i+=2) {
-        printf("%p : %4hx\n",message+i,*(unsigned short*)(message+i));
+    for(i=0;i<length-1;i+=2)
         sum+=*(unsigned short*)(message+i);
-    }
-    if(length%2==1) {
+    if(length%2==1)
         sum+=*(unsigned char*)(message+length-1);
-         printf("adding last byte. %x at %lu\n",*(unsigned char*)(message+length-1),length-1);
-    }
-     printf("sum before wrap around : %lx\n",sum);
 
-    while(sum>USHRT_MAX) {
-        printf("wrap around with %lx and %lx\n",sum&USHRT_MAX,sum>>16);
+    while(sum>USHRT_MAX)
         sum=(sum & USHRT_MAX) + (sum>>16);
-    }
-
-    printf("sum result ==== %hx\n",(unsigned short)sum);
-    printf("accu result ==== %hx\n",(unsigned short)~sum);
 
     return ~sum;
 }
 
+//For Debugging, dump given memory space
 void hexDump(unsigned char* buffer, size_t length) {
     size_t i;
     printf("===\nDumping %p...",buffer);
@@ -61,6 +49,7 @@ void hexDump(unsigned char* buffer, size_t length) {
     }
     printf("\n");
 }
+//Build a new header with given message.
 void buildHeader(unsigned char* header, bool isEncrypt, unsigned char shift, size_t length, char* message) {
     //Build Pseudo Header
     {
@@ -70,17 +59,11 @@ void buildHeader(unsigned char* header, bool isEncrypt, unsigned char shift, siz
         *(size_t*)(header+4)=htonl(length);
     }
 
-    //Copy message
-    // printf("=== dumping message\n");
-    // hexDump(message,length);
-    // strncpy(buffer+8,message,length);
-    // hexDump(buffer+8,length);
-
-    // hexDump(header,8);
-
     //Record checksum
-    *(unsigned short*)(header+2)=accumulateShorts(header,message,length);
+    *(unsigned short*)(header+2)=calcChecksum(header,message,length);
 }
+
+//sending message
 int sendMessage(char* hostName, unsigned short port, bool isEncrypt, unsigned char shift, size_t length, char* message) {
     int sockFd;
     struct sockaddr_in serverAddr;
@@ -94,50 +77,56 @@ int sendMessage(char* hostName, unsigned short port, bool isEncrypt, unsigned ch
 
     size_t n;
 
-    sockFd = socket(AF_INET, SOCK_STREAM, 0);
-    MYERROR(sockFd<0,"creating socket failed",-1);
-    
-    server = gethostbyname(hostName);
-    MYERROR(server==NULL,"getting host name failed",-2);
-    
-    memset(&serverAddr, 0, sizeof(serverAddr));
-    serverAddr.sin_family=AF_INET;
-    memcpy((char*)&(serverAddr.sin_addr.s_addr),(char*)server->h_addr,server->h_length);
-    serverAddr.sin_port=port;
+    //setting socket to connect
+    {
+        sockFd = socket(AF_INET, SOCK_STREAM, 0);
+        MYERROR(sockFd<0,"creating socket failed",-1);
+        
+        server = gethostbyname(hostName);
+        MYERROR(server==NULL,"getting host name failed",-2);
+        
+        memset(&serverAddr, 0, sizeof(serverAddr));
+        serverAddr.sin_family=AF_INET;
+        memcpy((char*)&(serverAddr.sin_addr.s_addr),(char*)server->h_addr,server->h_length);
+        serverAddr.sin_port=port;
+    }
 
     MYERROR(connect(sockFd,(struct sockaddr*)&serverAddr,sizeof(serverAddr))<0,"connecting failed",-3);
 
+    //create a header with stdin message
     buildHeader(header,isEncrypt,shift,length,message);
-    printf("checksum check = %hx\n",accumulateShorts(header,message,length));
-    // printf("dumping header");
-    // hexDump(header,9);
+
+    //sending head
     n=send(sockFd,header,8,0);
-    if(n==8) {
-        // printf("dumping message");
-        // hexDump(message,length);
-        n=send(sockFd,message,length,0);
-        MYERROR(n!=length,"sending message failed",-4);
+    if(n==8) { //If all head tranmitted
+        //sending message body
+        n=0;
+        while(n<length) {
+            int temp;
+            temp=send(sockFd,message+n,length< BUFFERSIZE ? length : BUFFERSIZE,0);
+            MYERROR(temp==-1,"sending message failed",-4);
+            n+=temp;
+        }
     }
     else {
-        MYERROR(true,"sending header failed",-5);
+        MYERROR(true,"sending header failed",-4);
     }
-    // n=send(sockFd,buffer,length+8,0);
-    // while(remainedSize>0)
     {
-        // size_t sending= remainedSize>=BUFFERSIZE ? BUFFERSIZE : remainedSize;
-        // strncpy(buffer,message,sending);
-        // n=send(sockFd,buffer+index,sending,0);
-        // MYERROR(n!=length+8,"sending failed",-4);
-        // printf("Sending %lu bytes...\n",n);
-        // remainedSize-=n;
-        // index+=n;
-
+        //receive header of response
         n=recv(sockFd,header,8,0);
         MYERROR(n<0,"receiving header failed",-5);
-
-        n=recv(sockFd,message,length,0);
-        MYERROR(n<0,"receiving response failed",-5);
-        printf("Response : %s\n",message);
+        if(n==8) { //If all head tranmitted
+            //receiving message body
+            n=0;
+            while(n<length) {
+                int temp=recv(sockFd,message+n,length,0);
+                MYERROR(temp<=0,"receiving response fully failed",-5);
+                n+=temp;
+            }
+            // n=recv(sockFd,message,length,0);
+            write(1,message,length);
+            // printf("Response : %s\n",message);
+        }
     }
     close(sockFd);
     return 0;
@@ -149,8 +138,8 @@ int main(int argc, char **argv) {
     bool isEncrypt;
     int shift;
 
-    bool optionsFlag[MAX_OPTION];
-    bool sumOptionsFlag;
+    bool optionsFlag[MAX_OPTION]; //whether each option is input
+    bool sumOptionsFlag; //&& of flags
 
     struct sockaddr hostSockaddr;
 
@@ -158,28 +147,31 @@ int main(int argc, char **argv) {
     int temp;
 
     char* buffer;
-    buffer=malloc(100);
-    printf("buffer : %p\n",buffer);
+    buffer=malloc(BUFFERSIZE);
+    // printf("buffer : %p\n",buffer);
 
     memset(&hostSockaddr,0,sizeof(hostSockaddr));
 
     memset(optionsFlag,0,sizeof(optionsFlag));
     sumOptionsFlag=true;
 
+    //from argument of main(), to options
     for(i=1;i<argc;i+=2) {
+        //Recognize next flag
         for(j=0;j<4;j++) {
             if(strncmp(&OPTIONS[j][0],argv[i],3)==0) {
                 optionsFlag[j]=true;
                 break;
             }
         }
+        //switch to each statement for each flag
         switch(j) {
             case 0 : 
                 strncpy(hostName,argv[i+1],strlen(argv[i+1]));
                 break;
             case 1 :
                 port=atoi(argv[i+1]);
-                if(port<0 || port>USHRT_MAX)
+                if(port<0 || port>USHRT_MAX) //Out of bound
                     optionsFlag[1]=false;
                 break;
             case 2 : 
@@ -187,12 +179,12 @@ int main(int argc, char **argv) {
                 switch(temp) {
                     case 0: isEncrypt=true; break;
                     case 1: isEncrypt=false; break;
-                    default: optionsFlag[2]=false;
+                    default: optionsFlag[2]=false; //Out of bound
                 }
                 break;
             case 3 :
-                shift=atoi(argv[i+1]);
-                if(shift<0 || shift>UCHAR_MAX)
+                shift=atoi(argv[i+1]);  
+                if(shift<0 || shift>UCHAR_MAX) //Out of bound
                     optionsFlag[3]=false;
                 break;
             default: 
@@ -202,24 +194,14 @@ int main(int argc, char **argv) {
     for(i=0;i<MAX_OPTION;i++)
         sumOptionsFlag = sumOptionsFlag && optionsFlag[i];
     if(sumOptionsFlag) {
-        temp=read(0,buffer,BUFFERSIZE);
-        printf("read : %d\n",temp);
-        if(temp>0) {
-            int temp2=0;
-            temp2=read(0,buffer+temp,BUFFERSIZE-temp);
-            if(temp2==0) {
-                // temp=6;
-                // printf("copy starting");
-                // strncpy(buffer,"Hello",temp);
-                // printf("copy complete");
-                printf("host : %s\nport : %d\n",hostName,port);
-                sendMessage(hostName,port,isEncrypt,shift,temp,buffer);
-                // printf("right after sendMessage()\n");
-            }
+        //All options are input
+        int temp;
+        while(temp=read(0,buffer,BUFFERSIZE)) {
+            MYERROR(temp==-1,"Reading error",-11);
+            sendMessage(hostName,port,isEncrypt,shift,temp,buffer);
         }
     }
 
-    // printf("before freeing\n");
     free(buffer);
     return 0;
 }
