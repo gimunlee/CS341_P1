@@ -10,10 +10,14 @@
 #include<sys/socket.h>
 #include<unistd.h>
 
+#define MAX_OPTION 1
+char OPTIONS[MAX_OPTION][3]={"-p"};
+
 #define BUFFERSIZE 10*1024*1024
 
-#define MYERROR(condition,msg,errorValue); if((condition)){printf("%s\n",(msg));return (errorValue);}
-//For Debugging, dump given memory space
+// #define MYERROR(condition,msg,errorValue); if((condition)){printf("%s\n",(msg));return (errorValue);}
+#define MYERROR(condition,msg,errorValue); if((condition)){return (errorValue);}
+//For Debugging, dump given memory space   
 void hexDump(unsigned char* buffer, size_t length) {
     size_t i;
     printf("===\nDumping %p...\n",buffer);
@@ -31,8 +35,11 @@ unsigned short calcChecksum(char* header, char* message, size_t length) {
 
     for(i=0;i<8;i+=2)
         sum+=*(unsigned short*)(header+i);
-    for(i=0;i<length-1;i+=2)
+    for(i=0;i<length-1;i+=2) {
         sum+=*(unsigned short*)(message+i);
+        if(sum>USHRT_MAX)
+            sum=(sum & USHRT_MAX) + (sum>>16);
+    }
     if(length%2==1)
         sum+=*(unsigned char*)(message+length-1);
 
@@ -68,12 +75,37 @@ void buildHeader(unsigned char* header, bool isEncrypt, unsigned char shift, siz
     *(unsigned short*)(header+2)=calcChecksum(header,message,length);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     int socketFd;
     struct sockaddr_in serverAddr, clientAddr;
+    short port=3000;
     socklen_t clientLen=sizeof(clientAddr);
 
+    bool optionsFlag[MAX_OPTION]; //whether each option is input
+
     size_t n; //temp
+
+    size_t i, j;
+
+    for(i=1;i<argc;i+=2) {
+        //Recognize next flag
+        for(j=0;j<MAX_OPTION;j++) {
+            if(strncmp(&OPTIONS[j][0],argv[i],3)==0) {
+                optionsFlag[j]=true;
+                break;
+            }
+        }
+        //switch to each statement for each flag
+        switch(j) {
+            case 0 :
+                port=atoi(argv[i+1]);
+                if(port<0 || port>USHRT_MAX) //Out of bound
+                    optionsFlag[1]=false;
+                break;
+            default: 
+                i=argc;//Unexpected flag
+        }
+    }
 
     //creating socket
     socketFd = socket(AF_INET, SOCK_STREAM, 0);
@@ -86,7 +118,7 @@ int main(void) {
     memset(&serverAddr, 0, sizeof(serverAddr));
     serverAddr.sin_family=AF_INET;
     serverAddr.sin_addr.s_addr=INADDR_ANY;
-    serverAddr.sin_port=3000;
+    serverAddr.sin_port=port;
     
     //bind, listen, accept
     MYERROR(bind(socketFd, (struct sockaddr*)&serverAddr, sizeof(serverAddr))<0,"binding socket failed",-2);
@@ -119,11 +151,15 @@ int main(void) {
             shift=header[1];
             length=ntohl(*((size_t*)(header+4)));
 
-            n = recv(inSocketFd,buffer,length,0);
-            MYERROR(n<0,"receiving message failed",-5);
+            n=0;
+            while(n<length) {
+                int temp = recv(inSocketFd,buffer+n,length,0);
+                MYERROR(temp<=0,"receiving message failed",-5);
+                n+=temp;
+            }
 
             if(calcChecksum(header,buffer,length)!=0) {
-                printf("checksum violation");
+                // printf("checksum violation");
                 free(buffer);
                 goto END_CONN;
             }

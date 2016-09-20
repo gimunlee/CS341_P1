@@ -12,8 +12,8 @@
 #include<netdb.h>
 #include<unistd.h>
 
-#define MYERROR(condition,msg,errorValue); if((condition)){printf("%s\n",(msg));return (errorValue);}
-
+// #define MYERROR(condition,msg,errorValue); if((condition)){printf("%s\n",(msg));return (errorValue);}
+#define MYERROR(condition,msg,errorValue); if((condition)){return (errorValue);}
 #define MAX_OPTION 4
 char OPTIONS[MAX_OPTION][3]={"-h","-p","-o","-s"};
 
@@ -158,7 +158,7 @@ int main(int argc, char **argv) {
     //from argument of main(), to options
     for(i=1;i<argc;i+=2) {
         //Recognize next flag
-        for(j=0;j<4;j++) {
+        for(j=0;j<MAX_OPTION;j++) {
             if(strncmp(&OPTIONS[j][0],argv[i],3)==0) {
                 optionsFlag[j]=true;
                 break;
